@@ -1,0 +1,7 @@
+# Local secrets & terminal configuration
+config.ini
+
+# Qt Creator & CMake build artifacts
+build/
+*.user
+CMakeLists.txt.user*
