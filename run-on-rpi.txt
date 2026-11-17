@@ -1,0 +1,26 @@
+sudo nano /etc/systemd/system/bit-terminal.service
+
+
+[Unit]
+Description=Bus Information Terminal Qt App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/bus-terminal-qt/build
+Environment="QT_QPA_PLATFORM=offscreen"
+ExecStart=/home/pi/bus-terminal-qt/build/BusTerminalApp
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable bit-terminal.service
+sudo systemctl start bit-terminal.service
+
+# Check live logs to confirm API polling & WebSocket connection
+journalctl -u bit-terminal.service -f

@@ -9,6 +9,9 @@ int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
 
+    app.setOrganizationName("SSNS");
+    app.setApplicationName("BIT View");
+
     // Load config.ini from the executable's directory
     QString configPath = QDir(QCoreApplication::applicationDirPath()).filePath("config.ini");
     QSettings settings(configPath, QSettings::IniFormat);

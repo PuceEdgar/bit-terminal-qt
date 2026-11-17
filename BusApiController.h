@@ -11,6 +11,8 @@
 #include <QByteArray>
 #include <QBuffer>
 #include <QWebSocket>
+#include <QSet>
+#include "BusAudioEngine.h"
 
 class BusApiController : public QObject
 {
@@ -19,6 +21,7 @@ class BusApiController : public QObject
     Q_PROPERTY(QVariantList busList READ busList NOTIFY dataUpdated)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
     Q_PROPERTY(int batteryLevel READ batteryLevel NOTIFY batteryChanged)
+    Q_PROPERTY(QString screenMode READ screenMode WRITE setScreenMode NOTIFY screenModeChanged)
 
 private:
     QNetworkAccessManager *m_networkManager;
@@ -33,6 +36,10 @@ private:
     QString m_stationId = "12345";
     QString m_serviceKey;
     int m_batteryLevel = 100;
+    QString m_screenMode = "vertical";
+    QString m_configPath;
+    BusAudioEngine *m_audioEngine = nullptr;
+    QSet<QString> m_announcedRoutes;
 
 public:
     explicit BusApiController(QObject *parent = nullptr);
@@ -42,6 +49,9 @@ public:
     QString stationName() const {return m_stationName;}
     QVariantList busList() const {return m_busList;}
     QString statusMessage() const {return m_statusMessage;}
+    QString screenMode() const { return m_screenMode; }
+
+    void setScreenMode(const QString &mode);
 
     Q_INVOKABLE void startPolling(const QString &apiUrl, const QString &serviceKey, const QString &stationId, int intervalMs = 15000);
     Q_INVOKABLE void fetchArrivals();
@@ -60,6 +70,7 @@ signals:
     void statusChanged();
     void requestScreenCapture(const QString &filePath);
     void batteryChanged();
+    void screenModeChanged();
 };
 
 #endif // BUSAPICONTROLLER_H

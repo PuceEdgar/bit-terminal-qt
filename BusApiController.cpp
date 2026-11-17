@@ -1,4 +1,5 @@
 #include "BusApiController.h"
+#include "BusAudioEngine.h"
 #include <QNetworkRequest>
 #include <QUrl>
 #include <QUrlQuery>
@@ -9,8 +10,18 @@
 #include <QDebug>
 #include <QBuffer>
 #include <QtConcurrent>
+#include <QCoreApplication>
+#include <QDir>
+#include <QSettings>
 
 BusApiController::BusApiController(QObject *parent) : QObject(parent), m_networkManager(new QNetworkAccessManager(this)), m_pollTimer(new QTimer(this)) {
+
+    m_configPath = QDir(QCoreApplication::applicationDirPath()).filePath("config.ini");
+    QSettings settings(m_configPath, QSettings::IniFormat);
+    m_screenMode = settings.value("Display/ScreenMode", "vertical").toString();
+
+    QString soundDir = QDir(QCoreApplication::applicationDirPath()).filePath("sounds");
+    m_audioEngine = new BusAudioEngine(soundDir, this);
 
     //connect network response signal
     connect(m_networkManager, &QNetworkAccessManager::finished, this, &BusApiController::onApiReply);
@@ -75,30 +86,6 @@ void BusApiController::sendImageToDaemon(const QImage &image) {
     //process on background thread START
     // Capture stationId by value so the background thread never touches 'this'
     QString stationId = m_stationId;
-
-    //run png compression and base64 encoding on background thread
-    // QtConcurrent::run(() {
-    //     QByteArray pngBytes;
-    //     QBuffer buffer(&pngBytes);
-    //     buffer.open(QIODevice::WriteOnly);
-    //     image.save(&buffer, "PNG");
-
-    //     QString base64String = QString::fromLatin1(pngBytes.toBase64());
-
-    //     QJsonObject payload;
-    //     payload["station_id"] = stationId;
-    //     payload["image_base64"] = base64String;
-
-    //     QString jsonString = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
-
-    //     // Safely hop back to the main thread ('this') to send over QWebSocket
-    //     QMetaObject::invokeMethod(this, [this, jsonString]() {
-    //         if (m_webSocket.state() == QAbstractSocket::ConnectedState) {
-    //             qint64 bytesSent = m_webSocket.sendTextMessage(jsonString);
-    //             qDebug() << "Background-encoded QHD frame sent:" << bytesSent << "bytes";
-    //         }
-    //     }, Qt::QueuedConnection);
-    // });
 
     auto future = QtConcurrent::run([this, image, stationId]() {
         QByteArray pngBytes;
@@ -223,56 +210,115 @@ void BusApiController::onApiReply(QNetworkReply *reply){
     QVariantList updatedList;
 
 
-    if (listVal.isArray()) {
-        QJsonArray arrivalArray = listVal.toArray(); //msgBody["busArrivalList"].toArray();
-
-
-
-        for (const QJsonValue &val : arrivalArray){
-            QJsonObject item = val.toObject();
-
-            QVariantMap busMap;
-
-            QJsonValue routeVal = item["routeName"];
-            busMap["routeNumber"] = routeVal.isDouble()
-                                        ? QString::number(routeVal.toInt())
-                                        : routeVal.toString();
-
-            busMap["destination"] = item["routeDestName"].toString();
-
-            // First Bus Info
-            busMap["etaMinutes"] = item["predictTimeSec1"].toInt(-1);
-            busMap["remainingStops"] = item["locationNo1"].toInt(-1);
-
-            updatedList.append(busMap);
-        }
-    } else if (listVal.isObject()) {
-        QJsonObject item = listVal.toObject();
-
+    auto parseBusItem = [](const QJsonObject &item) -> QVariantMap {
         QVariantMap busMap;
-
         QJsonValue routeVal = item["routeName"];
         busMap["routeNumber"] = routeVal.isDouble()
                                     ? QString::number(routeVal.toInt())
                                     : routeVal.toString();
 
         busMap["destination"] = item["routeDestName"].toString();
-
-        // First Bus Info
         busMap["etaMinutes"] = item["predictTimeSec1"].toInt(-1);
         busMap["remainingStops"] = item["locationNo1"].toInt(-1);
 
-        updatedList.append(busMap);
-    }
+        // Map Gyeonggi-do routeTypeCd to your WAV file prefix (if matching WAV exists)
+        int typeCd = item["routeTypeCd"].toInt(-1);
+        QString busType;
+        if (typeCd == 11) busType = QStringLiteral("직행좌석");
+        else if (typeCd == 12) busType = QStringLiteral("좌석");
+        else if (typeCd == 13) busType = QStringLiteral("일반");
+        else if (typeCd == 30) busType = QStringLiteral("마을");
+        else if (typeCd == 14 || typeCd == 16) busType = QStringLiteral("광역");
+        busMap["busType"] = busType;
 
+        return busMap;
+    };
+
+    // if (listVal.isArray()) {
+    //     QJsonArray arrivalArray = listVal.toArray(); //msgBody["busArrivalList"].toArray();
+
+
+
+    //     for (const QJsonValue &val : arrivalArray){
+    //         QJsonObject item = val.toObject();
+
+    //         QVariantMap busMap;
+
+    //         QJsonValue routeVal = item["routeName"];
+    //         busMap["routeNumber"] = routeVal.isDouble()
+    //                                     ? QString::number(routeVal.toInt())
+    //                                     : routeVal.toString();
+
+    //         busMap["destination"] = item["routeDestName"].toString();
+
+    //         // First Bus Info
+    //         busMap["etaMinutes"] = item["predictTimeSec1"].toInt(-1);
+    //         busMap["remainingStops"] = item["locationNo1"].toInt(-1);
+
+    //         updatedList.append(busMap);
+    //     }
+    // } else if (listVal.isObject()) {
+    //     QJsonObject item = listVal.toObject();
+
+    //     QVariantMap busMap;
+
+    //     QJsonValue routeVal = item["routeName"];
+    //     busMap["routeNumber"] = routeVal.isDouble()
+    //                                 ? QString::number(routeVal.toInt())
+    //                                 : routeVal.toString();
+
+    //     busMap["destination"] = item["routeDestName"].toString();
+
+    //     // First Bus Info
+    //     busMap["etaMinutes"] = item["predictTimeSec1"].toInt(-1);
+    //     busMap["remainingStops"] = item["locationNo1"].toInt(-1);
+
+    //     updatedList.append(busMap);
+    // }
+
+    if (listVal.isArray()) {
+        const QJsonArray arrivalArray = listVal.toArray();
+        for (const QJsonValue &val : arrivalArray) {
+            updatedList.append(parseBusItem(val.toObject()));
+        }
+    } else if (listVal.isObject()) {
+        updatedList.append(parseBusItem(listVal.toObject()));
+    }
 
 
     m_busList = updatedList;
     m_statusMessage = "Online";
 
+    // Collect ALL buses currently in the arriving-soon window
+    QList<QPair<QString, QString>> allCurrentlyArriving;
+    QSet<QString> currentlyArrivingSet;
+
+    for (const QVariant &v : std::as_const(m_busList)) {
+        QVariantMap bus = v.toMap();
+        QString route = bus["routeNumber"].toString();
+        int etaSec = bus["etaMinutes"].toInt();
+        int stops = bus["remainingStops"].toInt();
+
+        if ((etaSec > 0 && etaSec <= 90) || stops < 5) {
+            currentlyArrivingSet.insert(route);
+            allCurrentlyArriving.append({route, bus["busType"].toString()});
+            qDebug() << "Arriving soon bus: " << route << " " << bus["busType"].toString(); // Should print QSize(2560, 1440)
+        }
+    }
+
+    // Speak ALL currently arriving buses whenever the set changes
+    // (e.g. {} -> {7}, {7} -> {7, 3}, or {7, 3} -> {3})
+    if (!currentlyArrivingSet.isEmpty() && currentlyArrivingSet != m_announcedRoutes) {
+        if (m_audioEngine) {
+            m_audioEngine->playArriveSoonMessage(allCurrentlyArriving);
+        }
+    }
+
+    // Save the current snapshot for the next poll comparison
+    m_announcedRoutes = currentlyArrivingSet;
+
     emit dataUpdated();
     emit statusChanged();
-
     reply->deleteLater();
 }
 
@@ -298,4 +344,20 @@ void BusApiController::processCapturedImage(const QImage &image) {
     // QByteArray rawPixels(reinterpret_cast<const char*>(opaqueImage.constBits()), opaqueImage.sizeInBytes());
 
     // TODO: Send 'byteArray' over QTcpSocket / Serial / HTTP POST to your hardware
+}
+
+void BusApiController::setScreenMode(const QString &mode) {
+
+    if (m_screenMode == mode) {
+        return;
+    }
+
+    m_screenMode = mode;
+
+    //Write to config.ini
+    QSettings settings(m_configPath, QSettings::IniFormat);
+    settings.setValue("Display/ScreenMode", m_screenMode);
+    settings.sync(); //flush to disk
+
+    emit screenModeChanged();
 }
