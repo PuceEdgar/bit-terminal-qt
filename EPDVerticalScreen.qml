@@ -101,8 +101,9 @@ Item {
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        anchors.leftMargin: 24
+                        anchors.centerIn: parent
+                        //anchors.left: parent.left
+                        //anchors.leftMargin: 24
                         text: busController ? busController.stationName : "Preview Station"
                         color: "black"
                         font.pixelSize: 36
@@ -122,7 +123,7 @@ Item {
 
                     delegate: Rectangle {
                         width: arrivalListView.width
-                        height: 150
+                        height: 180
                         color: "white"
                         radius: 8
                         border.color: "black"
@@ -134,7 +135,9 @@ Item {
 
                             Rectangle {
                                 width: 100
-                                height: 58
+                                height: 100
+                                border.color: "black"
+
 
                                 Text {
                                     anchors.centerIn: parent
@@ -148,6 +151,8 @@ Item {
                             ColumnLayout {
                                 Layout.alignment: Qt.AlignRight
                                 spacing: 2
+
+
 
                                 Text {
                                     Layout.alignment: Qt.AlignRight
@@ -164,14 +169,26 @@ Item {
                                     font.pixelSize: 18
                                 }
 
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: "To: " + modelData.destination
-                                    color: "black"
-                                    font.pixelSize: 26
-                                }
+
                             }
+
+
+
                         }
+
+                        Text {
+                            text: "To: " + modelData.destination
+                            color: "black"
+                            font.pixelSize: 26
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            anchors.bottom: parent.bottom
+                            leftPadding: 15
+                            bottomPadding: 5
+
+                        }
+
+
                     }
                 }
 

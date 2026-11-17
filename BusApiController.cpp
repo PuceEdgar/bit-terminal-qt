@@ -19,7 +19,7 @@ BusApiController::BusApiController(QObject *parent) : QObject(parent), m_network
     m_configPath = QDir(QCoreApplication::applicationDirPath()).filePath("config.ini");
     QSettings settings(m_configPath, QSettings::IniFormat);
     m_screenMode = settings.value("Display/ScreenMode", "vertical").toString();
-
+    m_stationName = settings.value("Terminal/StationName", "Unknown").toString();
     QString soundDir = QDir(QCoreApplication::applicationDirPath()).filePath("sounds");
     m_audioEngine = new BusAudioEngine(soundDir, this);
 

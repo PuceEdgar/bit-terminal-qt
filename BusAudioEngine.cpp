@@ -259,25 +259,7 @@ void BusAudioEngine::appendWavFile(const QString &fileName, QByteArray &outPcm) 
 
     // // Linear resampling to 44100 Hz and encoding as Int16 stereo
     // double ratio = static_cast<double>(sampleRate) / m_targetFormat.sampleRate();
-    // int targetFrames = static_cast<int>(frameCount / ratio);
 
-    // for (int i = 0; i < targetFrames; ++i) {
-    //     double srcPos = i * ratio;
-    //     int idx0 = static_cast<int>(srcPos);
-    //     int idx1 = std::min(idx0 + 1, frameCount - 1);
-    //     double frac = srcPos - idx0;
-
-    //     float l = stereoFrames[idx0].first  * (1.0 - frac) + stereoFrames[idx1].first  * frac;
-    //     float r = stereoFrames[idx0].second * (1.0 - frac) + stereoFrames[idx1].second * frac;
-
-    //     qint16 outL = static_cast<qint16>(std::clamp(l * 32767.0f, -32768.0f, 32767.0f));
-    //     qint16 outR = static_cast<qint16>(std::clamp(r * 32767.0f, -32768.0f, 32767.0f));
-
-    //     char sampleBytes[4];
-    //     qToLittleEndian(outL, reinterpret_cast<uchar *>(sampleBytes));
-    //     qToLittleEndian(outR, reinterpret_cast<uchar *>(sampleBytes + 2));
-    //     outPcm.append(sampleBytes, 4);
-    // }
     if (stereoFrames.isEmpty()) return;
 
     // 1. Trim leading and trailing silence (noise floor threshold ~ -36 dB)
