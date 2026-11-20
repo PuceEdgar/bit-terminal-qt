@@ -23,10 +23,15 @@ int main(int argc, char *argv[])
     int pollInterval = settings.value("Terminal/PollIntervalMs", 30000).toInt();
 
 
+    QString serialPort = settings.value("Serial/PortName", "COM3").toString();
+    int baudRate = settings.value("Serial/BaudRate", 115200).toInt();
+    int tconMode = settings.value("Serial/TconWriteMode", 3).toInt();
+
     BusApiController busController;
     //busController.startPolling("https://apis.data.go.kr/6410000/busarrivalservice/v2/getBusArrivalListv2", 30000);
     busController.startPolling(apiUrl, serviceKey, stationId, pollInterval);
-    busController.connectToDaemon(daemonWsUrl, stationId);
+    //busController.connectToDaemon(daemonWsUrl, stationId);
+    busController.connectToEnvBoard(serialPort, baudRate, tconMode);
 
     QQmlApplicationEngine engine;
 

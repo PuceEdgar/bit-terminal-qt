@@ -53,7 +53,7 @@ void BusAudioEngine::playArriveSoonMessage(const QList<QPair<QString, QString>> 
     // for (const auto &bus : messageBuses) {
     //     announceComplexBus(bus.first, bus.second, fileQueue);
     // }
-    qDebug() << "playing arrive soon...";
+    //qDebug() << "playing arrive soon...";
     for (int i = 0; i < messageBuses.size(); ++i) {
         announceComplexBus(messageBuses[i].first, messageBuses[i].second, fileQueue);
         if (i < messageBuses.size() - 1) {

@@ -46,6 +46,7 @@ Item {
         function captureAndSendToDaemon() {
             bitMainContent.grabToImage(function (result) {
                 if (typeof busController !== "undefined" && busController) {
+                    console.log("sending image to daemon");
                     busController.sendImageToDaemon(result.image);
                 } else {
                     console.log("Preview mode: Captured QHD frame.");
@@ -111,6 +112,34 @@ Item {
                     }
                 }
 
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 80
+                    color: "white"
+                    border.color: "black"
+                    radius: 10
+
+
+                    Row {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.margins: 14
+                            spacing: 6
+
+                            Text {
+                                id: arriveSoon
+                                text: "Arrive Soon:"
+                                font.pixelSize: 24
+                            }
+
+                            Text {
+                                id: buses
+                                text: busController ? busController.arriveSoonBuses : "9"
+                                font.pixelSize: 24
+                            }
+                        }
+                }
+
                 // 2. Main Content: Arriving Buses List
                 ListView {
                     id: arrivalListView
@@ -156,7 +185,7 @@ Item {
 
                                 Text {
                                     Layout.alignment: Qt.AlignRight
-                                    text: modelData.etaMinutes <= 1 ? "Arriving Soon" : modelData.etaMinutes + " sec"
+                                    text: modelData.etaMinutes <= 1 ? "Arriving Soon" : modelData.etaMinutes + " min"
                                     color: "black"
                                     font.pixelSize: 32
                                     font.bold: true

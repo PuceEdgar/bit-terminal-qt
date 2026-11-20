@@ -20,6 +20,8 @@ BusApiController::BusApiController(QObject *parent) : QObject(parent), m_network
     QSettings settings(m_configPath, QSettings::IniFormat);
     m_screenMode = settings.value("Display/ScreenMode", "vertical").toString();
     m_stationName = settings.value("Terminal/StationName", "Unknown").toString();
+    m_arriveSoonMinutes = settings.value("Terminal/ArriveSoonMinutes", 3).toInt();
+    m_arriveSoonStops = settings.value("Terminal/ArriveSoonStops", 2).toInt();
     QString soundDir = QDir(QCoreApplication::applicationDirPath()).filePath("sounds");
     m_audioEngine = new BusAudioEngine(soundDir, this);
 
@@ -35,11 +37,32 @@ BusApiController::BusApiController(QObject *parent) : QObject(parent), m_network
     connect(&m_webSocket, &QWebSocket::textMessageReceived, this, &BusApiController::onWsTextMessageReceived);
 
     //5 second auto reconnect timer
-    m_wsReconnectTimer.setSingleShot(true);
-    m_wsReconnectTimer.setInterval(5000);
-    connect(&m_wsReconnectTimer, &QTimer::timeout, this, [this]() {
-        qDebug() << "Attempting WebSocket reconnect to: " << m_daemonUrl.toString();
-        m_webSocket.open(m_daemonUrl);
+    // m_wsReconnectTimer.setSingleShot(true);
+    // m_wsReconnectTimer.setInterval(5000);
+    // connect(&m_wsReconnectTimer, &QTimer::timeout, this, [this]() {
+    //     qDebug() << "Attempting WebSocket reconnect to: " << m_daemonUrl.toString();
+    //     m_webSocket.open(m_daemonUrl);
+    // });
+
+    m_envManager = new SSEnvManager(this);
+    connect(m_envManager, &SSEnvManager::stateReceived, this, &BusApiController::onEnvStateReceived);
+    connect(m_envManager, &SSEnvManager::reconnectRequested, this, &BusApiController::onEnvReconnectRequested);
+    connect(m_envManager, &SSEnvManager::disconnected, this, [this]() {
+        emit envTelemetryChanged();
+        if(!m_serialReconnectTimer.isActive()){
+            m_serialReconnectTimer.start();
+        }
+    });
+
+    // 5-second auto-reconnect timer for serial port
+    m_serialReconnectTimer.setSingleShot(true);
+    m_serialReconnectTimer.setInterval(5000);
+    connect(&m_serialReconnectTimer, &QTimer::timeout, this, [this]() {
+        if(!m_serialPort.isEmpty() && !m_envManager->connectYN()){
+            qDebug() << "Attempting serial reconnect to: " << m_serialPort;
+            m_envManager->connectProc(m_serialPort, m_baudRate);
+            emit envTelemetryChanged();
+        }
     });
 }
 
@@ -72,71 +95,6 @@ void BusApiController::onWsTextMessageReceived(const QString &message){
     }
 }
 
-void BusApiController::sendImageToDaemon(const QImage &image) {
-    if (image.isNull()) {
-        qWarning() << "Cannot send null image";
-        return;
-    }
-
-    if (m_webSocket.state() != QAbstractSocket::ConnectedState){
-        qWarning() << "Websocket is not connected. Cannot send image";
-        return;
-    }
-
-    //process on background thread START
-    // Capture stationId by value so the background thread never touches 'this'
-    QString stationId = m_stationId;
-
-    auto future = QtConcurrent::run([this, image, stationId]() {
-        QByteArray pngBytes;
-        QBuffer buffer(&pngBytes);
-        buffer.open(QIODevice::WriteOnly);
-        image.save(&buffer, "PNG");
-
-        QString base64String = QString::fromLatin1(pngBytes.toBase64());
-
-        QJsonObject payload;
-        payload["station_id"] = stationId;
-        payload["image_base64"] = base64String;
-
-        QString jsonString = QString::fromUtf8(
-            QJsonDocument(payload).toJson(QJsonDocument::Compact)
-            );
-
-        // Safely hop back to the main thread to send over QWebSocket
-        QMetaObject::invokeMethod(this, [this, jsonString]() {
-            if (m_webSocket.state() == QAbstractSocket::ConnectedState) {
-                qint64 bytesSent = m_webSocket.sendTextMessage(jsonString);
-                qDebug() << "Background-encoded QHD frame sent:" << bytesSent << "bytes";
-            }
-        }, Qt::QueuedConnection);
-    });
-    Q_UNUSED(future);
-
-    //background thread process END
-
-    //processing on ui/main thread START
-    //encode image to png byte in RAM
-    // QByteArray pngBytes;
-    // QBuffer buffer(&pngBytes);
-    // buffer.open(QIODevice::WriteOnly);
-    // image.save(&buffer, "PNG");
-
-
-    // //convert to base64 string
-    // QString base64String = QString::fromLatin1(pngBytes.toBase64());
-
-    // //construct JSON to send to daemon
-    // QJsonObject payload;
-    // payload["station_id"] = m_stationId;
-    // payload["image_base64"] = base64String;
-
-    // QString jsonString = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
-
-    // //send to websocket
-    // qint64 bytesSent = m_webSocket.sendTextMessage(jsonString);
-    // qDebug() << "Sent QHD PNG payload over websocket: " << bytesSent << " bytes";
-}
 
 void BusApiController::startPolling(const QString &apiUrl, const QString &serviceKey, const QString &stationId, int intervalMs) {
     m_apiUrl = apiUrl;
@@ -171,6 +129,8 @@ void BusApiController::fetchArrivals() {
 }
 
 void BusApiController::onApiReply(QNetworkReply *reply){
+
+    m_arriveSoonBuses = "";
     if (reply->error() != QNetworkReply::NoError) {
         m_statusMessage = "Network Error: " + reply->errorString();
         emit statusChanged();
@@ -211,6 +171,10 @@ void BusApiController::onApiReply(QNetworkReply *reply){
 
 
     auto parseBusItem = [](const QJsonObject &item) -> QVariantMap {
+
+        //qDebug() << item;
+
+        //qDebug() << "Route name: " << item["routeName"] << " Destination: " << item["routeDestName"].toString() << " ETA minutes: " << item["predictTime1"] << " Remaining Stops: " << item["locationNo1"];
         QVariantMap busMap;
         QJsonValue routeVal = item["routeName"];
         busMap["routeNumber"] = routeVal.isDouble()
@@ -218,8 +182,8 @@ void BusApiController::onApiReply(QNetworkReply *reply){
                                     : routeVal.toString();
 
         busMap["destination"] = item["routeDestName"].toString();
-        busMap["etaMinutes"] = item["predictTimeSec1"].toInt(-1);
-        busMap["remainingStops"] = item["locationNo1"].toInt(-1);
+        busMap["etaMinutes"] = item["predictTime1"].toInt();
+        busMap["remainingStops"] = item["locationNo1"].toInt();
 
         // Map Gyeonggi-do routeTypeCd to your WAV file prefix (if matching WAV exists)
         int typeCd = item["routeTypeCd"].toInt(-1);
@@ -233,48 +197,6 @@ void BusApiController::onApiReply(QNetworkReply *reply){
 
         return busMap;
     };
-
-    // if (listVal.isArray()) {
-    //     QJsonArray arrivalArray = listVal.toArray(); //msgBody["busArrivalList"].toArray();
-
-
-
-    //     for (const QJsonValue &val : arrivalArray){
-    //         QJsonObject item = val.toObject();
-
-    //         QVariantMap busMap;
-
-    //         QJsonValue routeVal = item["routeName"];
-    //         busMap["routeNumber"] = routeVal.isDouble()
-    //                                     ? QString::number(routeVal.toInt())
-    //                                     : routeVal.toString();
-
-    //         busMap["destination"] = item["routeDestName"].toString();
-
-    //         // First Bus Info
-    //         busMap["etaMinutes"] = item["predictTimeSec1"].toInt(-1);
-    //         busMap["remainingStops"] = item["locationNo1"].toInt(-1);
-
-    //         updatedList.append(busMap);
-    //     }
-    // } else if (listVal.isObject()) {
-    //     QJsonObject item = listVal.toObject();
-
-    //     QVariantMap busMap;
-
-    //     QJsonValue routeVal = item["routeName"];
-    //     busMap["routeNumber"] = routeVal.isDouble()
-    //                                 ? QString::number(routeVal.toInt())
-    //                                 : routeVal.toString();
-
-    //     busMap["destination"] = item["routeDestName"].toString();
-
-    //     // First Bus Info
-    //     busMap["etaMinutes"] = item["predictTimeSec1"].toInt(-1);
-    //     busMap["remainingStops"] = item["locationNo1"].toInt(-1);
-
-    //     updatedList.append(busMap);
-    // }
 
     if (listVal.isArray()) {
         const QJsonArray arrivalArray = listVal.toArray();
@@ -299,16 +221,21 @@ void BusApiController::onApiReply(QNetworkReply *reply){
         int etaSec = bus["etaMinutes"].toInt();
         int stops = bus["remainingStops"].toInt();
 
-        if ((etaSec > 0 && etaSec <= 90) || stops < 5) {
+        if ((etaSec > 0 && etaSec <= m_arriveSoonMinutes) || stops < m_arriveSoonStops) {
             currentlyArrivingSet.insert(route);
             allCurrentlyArriving.append({route, bus["busType"].toString()});
+            m_arriveSoonBuses += route + " ";
+
             qDebug() << "Arriving soon bus: " << route << " " << bus["busType"].toString(); // Should print QSize(2560, 1440)
         }
     }
 
+    qDebug() << "m_arriveSoonBuses: " << m_arriveSoonBuses;
     // Speak ALL currently arriving buses whenever the set changes
     // (e.g. {} -> {7}, {7} -> {7, 3}, or {7, 3} -> {3})
     if (!currentlyArrivingSet.isEmpty() && currentlyArrivingSet != m_announcedRoutes) {
+        qDebug() << "audio engine: ";
+        qDebug() << m_audioEngine;
         if (m_audioEngine) {
             m_audioEngine->playArriveSoonMessage(allCurrentlyArriving);
         }
@@ -319,6 +246,7 @@ void BusApiController::onApiReply(QNetworkReply *reply){
 
     emit dataUpdated();
     emit statusChanged();
+    emit arriveSoonBusesChanged();
     reply->deleteLater();
 }
 
@@ -360,4 +288,96 @@ void BusApiController::setScreenMode(const QString &mode) {
     settings.sync(); //flush to disk
 
     emit screenModeChanged();
+}
+
+void BusApiController::connectToEnvBoard(const QString &portName, int baudRate, int tconWriteMode)
+{
+    m_serialPort = portName;
+    m_baudRate = baudRate;
+    m_tconWriteMode = tconWriteMode;
+
+    m_envManager->connectProc(m_serialPort, m_baudRate);
+    emit envTelemetryChanged();
+
+    if (!m_envManager->connectYN()) {
+        m_serialReconnectTimer.start();
+    }
+}
+
+void BusApiController::onEnvReconnectRequested()
+{
+    if (!m_serialPort.isEmpty()) {
+        m_envManager->connectProc(m_serialPort, m_baudRate);
+        emit envTelemetryChanged();
+    }
+}
+
+void BusApiController::onEnvStateReceived(const SSEnv2State &state)
+{
+    if (m_batteryLevel != state.battPercent) {
+        m_batteryLevel = state.battPercent;
+        emit batteryChanged();
+    }
+    m_boardTemperature = state.temperature1;
+    m_boardHumidity = state.humidity;
+    emit envTelemetryChanged();
+}
+
+void BusApiController::setBoardVolume(int volumeLevel)
+{
+    if (m_envManager) {
+        m_envManager->sendVolumeSet(qBound(0, volumeLevel, 10));
+    }
+}
+
+void BusApiController::requestBoardStatus()
+{
+    if (m_envManager) {
+        m_envManager->sendStatusRequest();
+    }
+}
+
+void BusApiController::sendImageToDaemon(const QImage &image)
+{
+    if (image.isNull()) {
+        qWarning() << "Cannot send null image";
+        return;
+    }
+
+    if (!m_envManager || !m_envManager->connectYN()) {
+        qWarning() << "ENV serial board is not connected. Cannot send TCON frame.";
+        return;
+    }
+
+    int writeMode = m_tconWriteMode;
+ QString stationId = m_stationId;
+    // Convert QImage to 8-bit grayscale on a worker thread so UI stays 60 FPS
+    auto future = QtConcurrent::run([this, image, stationId, writeMode]() {
+     //QImage flippedImage = image.flipped(Qt::Horizontal);
+     QImage flippedImage = image.mirrored(true, false);
+     QImage gray = flippedImage.convertToFormat(QImage::Format_Grayscale8);
+        //QImage gray = image.convertToFormat(QImage::Format_Grayscale8);
+        int w = gray.width();
+        int h = gray.height();
+
+        // Copy row-by-row to strip any 32-bit stride alignment padding from QImage
+        QByteArray rawPixels;
+        rawPixels.reserve(w * h);
+        for (int y = 0; y < h; ++y) {
+            rawPixels.append(reinterpret_cast<const char *>(gray.constScanLine(y)), w);
+        }
+
+        // Hop back to main thread to safely enqueue onto SSEnvManager's Tx queue
+        QMetaObject::invokeMethod(this, [this, rawPixels, w, h, writeMode]() {
+            if (!m_envManager || !m_envManager->connectYN()) return;
+
+            if (writeMode == 4) {
+                m_envManager->tconImageWrite4(rawPixels, 0, 0, w, h);
+            } else {
+                m_envManager->tconImageWrite3(rawPixels, 0, 0, w, h);
+            }
+            qDebug() << "Queued local TCON frame (" << w << "x" << h << ") mode:" << writeMode;
+        }, Qt::QueuedConnection);
+    });
+    Q_UNUSED(future);
 }

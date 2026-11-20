@@ -5,7 +5,7 @@ project(BitTestQt VERSION 0.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Quick Network WebSockets Concurrent Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Core Quick Network WebSockets Concurrent Multimedia SerialPort)
 
 qt_standard_project_setup(REQUIRES 6.10)
 
@@ -34,6 +34,10 @@ qt_add_qml_module(appBitTestQt
         QML_FILES EPDHorizontalScreen.qml
         QML_FILES LEDScreen.qml
         SOURCES BusAudioEngine.h BusAudioEngine.cpp
+        SOURCES BitConvertUtils.h BitConvertUtils.cpp
+        SOURCES SSEnvProtocol.h
+        SOURCES SSEnvModules.h SSEnvModules.cpp
+        SOURCES SSEnvManager.h SSEnvManager.cpp
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
@@ -55,6 +59,7 @@ target_link_libraries(appBitTestQt
     Qt6::WebSockets
     Qt6::Concurrent
     Qt6::Multimedia
+    Qt6::SerialPort
 )
 
 if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sounds")
