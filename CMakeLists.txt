@@ -38,6 +38,7 @@ qt_add_qml_module(appBitTestQt
         SOURCES SSEnvProtocol.h
         SOURCES SSEnvModules.h SSEnvModules.cpp
         SOURCES SSEnvManager.h SSEnvManager.cpp
+        SOURCES AppLogger.h AppLogger.cpp
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
